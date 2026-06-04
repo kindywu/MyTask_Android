@@ -22,7 +22,16 @@
       "Bash(adb install *)",
       "Bash(adb shell *)",
       "Bash(adb logcat *)",
-      "Bash(adb exec-out *)"
+      "Bash(adb exec-out *)",
+      "Bash(adb -s emulator-5554 wait-for-device)",
+      "Bash(adb -s emulator-5554 shell 'while [[ \"$\\(getprop sys.boot_completed\\)\" != \"1\" ]]; do sleep 2; done')",
+      "Bash(cmd /c \"c:\\\\ws\\\\android\\\\MyApp\\\\build.bat\")",
+      "Bash(iconv -f gbk -t utf-8)",
+      "Bash(xxd \"c:/ws/android/MyApp/build.bat\")",
+      "Bash(exit 0)",
+      "Bash(cmd *)",
+      "Bash(adb -s emulator-5554 emu kill)",
+      "Bash(adb disconnect *)"
     ]
   }
 }
