@@ -5,6 +5,7 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import com.example.myapplication.data.db.entity.CategoryEntity
 import kotlinx.coroutines.flow.Flow
@@ -28,4 +29,13 @@ interface CategoryDao {
 
     @Query("SELECT COUNT(*) FROM tasks WHERE categoryId = :categoryId")
     suspend fun getTaskCountForCategory(categoryId: Long): Int
+
+    @Query("UPDATE tasks SET categoryId = NULL WHERE categoryId = :categoryId")
+    suspend fun clearCategoryReferences(categoryId: Long)
+
+    @Transaction
+    suspend fun deleteWithReferencesCleared(category: CategoryEntity) {
+        clearCategoryReferences(category.id)
+        delete(category)
+    }
 }

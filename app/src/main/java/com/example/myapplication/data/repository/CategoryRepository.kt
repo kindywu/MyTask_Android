@@ -12,7 +12,8 @@ class CategoryRepository(private val dao: CategoryDao) {
 
     suspend fun updateCategory(category: CategoryEntity) = dao.update(category)
 
-    suspend fun deleteCategory(category: CategoryEntity) = dao.delete(category)
+    suspend fun deleteCategory(category: CategoryEntity) =
+        dao.deleteWithReferencesCleared(category)
 
     suspend fun getTaskCount(categoryId: Long): Int = dao.getTaskCountForCategory(categoryId)
 
