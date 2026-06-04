@@ -58,8 +58,8 @@ dependencies {
     ksp(libs.androidx.room.compiler)
     // Navigation
     implementation(libs.androidx.navigation.compose)
-    // DataStore
-    implementation(libs.androidx.datastore.preferences)
+    // DataStore (not needed — using SharedPreferences for PIN)
+    // implementation(libs.androidx.datastore.preferences)
     // WorkManager
     implementation(libs.androidx.work.runtime.ktx)
     // Turbine (test)
