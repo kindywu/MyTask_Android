@@ -51,12 +51,7 @@ class TaskRepository(private val dao: TaskDao) {
         dao.update(task.copy(isCompleted = !task.isCompleted, updatedAt = System.currentTimeMillis()))
     }
 
-    suspend fun deleteTask(taskId: Long) {
-        for (sub in dao.getSubtasks(taskId)) {
-            deleteTask(sub.id)
-        }
-        dao.deleteById(taskId)
-    }
+    suspend fun deleteTask(taskId: Long) = dao.deleteRecursively(taskId)
 
     suspend fun buildTaskTree(parentId: Long? = null): List<TaskWithSubtasks> {
         val tasks = if (parentId == null) dao.getRootTasks().first()

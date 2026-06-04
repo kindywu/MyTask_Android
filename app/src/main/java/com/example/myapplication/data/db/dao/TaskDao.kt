@@ -5,6 +5,7 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import com.example.myapplication.data.db.entity.TaskEntity
 import kotlinx.coroutines.flow.Flow
@@ -46,4 +47,12 @@ interface TaskDao {
 
     @Query("SELECT * FROM tasks")
     suspend fun getAllSnapshot(): List<TaskEntity>
+
+    @Transaction
+    suspend fun deleteRecursively(taskId: Long) {
+        for (sub in getSubtasks(taskId)) {
+            deleteRecursively(sub.id)
+        }
+        deleteById(taskId)
+    }
 }
