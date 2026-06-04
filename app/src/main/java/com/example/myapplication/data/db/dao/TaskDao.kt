@@ -43,4 +43,7 @@ interface TaskDao {
 
     @Query("SELECT COUNT(*) FROM tasks WHERE parentTaskId = :parentId")
     suspend fun getSubtaskCount(parentId: Long): Int
+
+    @Query("SELECT * FROM tasks")
+    suspend fun getAllSnapshot(): List<TaskEntity>
 }
