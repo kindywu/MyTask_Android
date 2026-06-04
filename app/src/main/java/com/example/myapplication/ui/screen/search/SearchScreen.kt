@@ -33,6 +33,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.example.myapplication.data.repository.SortBy
 import com.example.myapplication.ui.component.EmptyState
 import com.example.myapplication.ui.component.TaskCard
 
@@ -90,7 +91,7 @@ fun SearchScreen(
                 Box {
                     FilterChip(selected = false, onClick = { showSortMenu = true }, label = { Text("Sort") })
                     DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
-                        SearchViewModel.SortBy.entries.forEach { s ->
+                        SortBy.entries.forEach { s ->
                             DropdownMenuItem(text = { Text(s.name) }, onClick = { viewModel.setSortBy(s); showSortMenu = false })
                         }
                     }

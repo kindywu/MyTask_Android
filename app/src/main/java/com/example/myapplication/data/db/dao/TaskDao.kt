@@ -5,8 +5,10 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.RawQuery
 import androidx.room.Transaction
 import androidx.room.Update
+import androidx.sqlite.db.SupportSQLiteQuery
 import com.example.myapplication.data.db.entity.TaskEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -44,6 +46,9 @@ interface TaskDao {
 
     @Query("SELECT COUNT(*) FROM tasks WHERE parentTaskId = :parentId")
     suspend fun getSubtaskCount(parentId: Long): Int
+
+    @RawQuery(observedEntities = [TaskEntity::class])
+    fun searchFilterSort(query: SupportSQLiteQuery): Flow<List<TaskEntity>>
 
     @Query("SELECT * FROM tasks")
     suspend fun getAllSnapshot(): List<TaskEntity>

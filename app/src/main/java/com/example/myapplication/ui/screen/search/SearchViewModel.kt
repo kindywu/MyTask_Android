@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.myapplication.data.db.entity.CategoryEntity
 import com.example.myapplication.data.db.entity.TaskEntity
 import com.example.myapplication.data.repository.CategoryRepository
+import com.example.myapplication.data.repository.SortBy
 import com.example.myapplication.data.repository.TaskRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,8 +31,6 @@ class SearchViewModel(
         val sortBy: SortBy = SortBy.CREATED,
     )
 
-    enum class SortBy { DUE_DATE, PRIORITY, CREATED, TITLE }
-
     private val _query = MutableStateFlow("")
     private val _filterPriority = MutableStateFlow<String?>(null)
     private val _filterCategoryId = MutableStateFlow<Long?>(null)
@@ -44,22 +43,13 @@ class SearchViewModel(
     ) { q, p, c, done, s -> listOf(q, p, c, done, s) }
         .flatMapLatest { (q, pri, cat, done, sort) ->
             combine(
-                if ((q as String).isNotBlank()) taskRepo.search(q) else taskRepo.getAll(),
+                taskRepo.searchFilterSort(
+                    q as String, pri as String?, cat as Long?, done as Boolean?, sort as SortBy,
+                ),
                 catRepo.allCategories,
             ) { tasks, cats ->
-                var filtered = tasks
-                if (pri != null) filtered = filtered.filter { it.priority == pri }
-                if (cat != null) filtered = filtered.filter { it.categoryId == cat }
-                if (done != null) filtered = filtered.filter { it.isCompleted == done }
-
-                val sorter: Comparator<TaskEntity> = when (sort as SortBy) {
-                    SortBy.DUE_DATE -> compareBy { it.dueDate ?: Long.MAX_VALUE }
-                    SortBy.PRIORITY -> compareBy { when (it.priority) { "HIGH" -> 0; "MEDIUM" -> 1; else -> 2 } }
-                    SortBy.CREATED -> compareByDescending { it.createdAt }
-                    SortBy.TITLE -> compareBy { it.title.lowercase() }
-                }
                 UiState(
-                    query = q, tasks = filtered.sortedWith(sorter), categories = cats,
+                    query = q as String, tasks = tasks, categories = cats,
                     filterPriority = pri as String?, filterCategoryId = cat as Long?,
                     filterCompleted = done as Boolean?, sortBy = sort as SortBy,
                 )
