@@ -291,6 +291,7 @@ classDiagram
         +delete(task)
         +search(query) Flow~List~
         +getAll() Flow~List~
+        +searchFilterSort(SupportSQLiteQuery) Flow~List~
     }
     class CategoryDao {
         +getAll() Flow~List~
@@ -410,6 +411,7 @@ ViewModel  -->  Repository  -->  DAO / DataStore
 | `deleteTask(id)` | `suspend` | **递归删除**——先删所有子任务 |
 | `buildTaskTree(parentId?)` | `suspend → List<TaskWithSubtasks>` | 构建递归任务树 |
 | `search(query)` | `Flow<List<TaskEntity>>` | 全文搜索标题和备注 |
+| `searchFilterSort(...)` | `Flow<List<TaskEntity>>` | 动态 SQL 搜索 + 过滤 + 排序，全部在数据库执行 |
 
 **递归删除模式**值得关注：
 ```kotlin
@@ -712,7 +714,7 @@ ViewModel 用分类信息丰富任务实体（`TaskItem`），并分离为活跃
 
 #### SearchScreen（搜索页）
 
-**多维度过滤 + 排序：**
+**多维度过滤 + 排序——全部在数据库层执行：**
 
 ```mermaid
 graph TD
@@ -722,12 +724,12 @@ graph TD
     FD["_filterCompleted"] --> COMBINE5
     SORT["_sortBy"] --> COMBINE5
     COMBINE5["combine(5 个触发源)"] --> FLATMAP
-    REPO["taskRepo.search/all + catRepo.allCategories"] --> FLATMAP
-    FLATMAP --> FILTER["客户端过滤 + 排序"]
-    FILTER --> STATEIN["stateIn()"]
+    REPO["taskRepo.searchFilterSort() + catRepo.allCategories"] --> FLATMAP
+    FLATMAP --> STATEIN["stateIn()"]
+    STATEIN --> UI["UiState —— 已过滤已排序的数据"]
 ```
 
-搜索使用 Room 的 `LIKE '%' || :query || '%'` 进行标题和备注的全文匹配。搜索词为空时退回 `getAll()`。额外的过滤（优先级、分类、完成状态）和排序在客户端对 Flow 输出进行处理。
+搜索、过滤（优先级、分类、完成状态）和排序全部通过动态构建的 SQL 查询在 Room 中执行。`TaskRepository.searchFilterSort()` 根据参数动态拼接 WHERE 子句和 ORDER BY 子句，使用 `@RawQuery` + `SimpleSQLiteQuery` 支持灵活的查询组合，避免将大量数据加载到内存再过滤。
 
 #### CategoriesScreen（分类管理页）
 

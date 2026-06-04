@@ -72,9 +72,10 @@ PINLock → TaskList → TaskDetail → EditTask
 - 4-digit numeric only
 
 ### Reminders
-- WorkManager OneTimeWorkRequest scheduled per task
-- Task update → cancel old work, schedule new
-- Notification opens task detail on tap
+- PeriodicWorkRequest scans all tasks, checks 5-min window around reminder time
+- Notification channel created in Application.onCreate()
+- POST_NOTIFICATIONS permission checked before notify()
+- Notification opens app launch intent on tap
 
 ## Screens
 
@@ -105,8 +106,9 @@ PINLock → TaskList → TaskDetail → EditTask
 
 ### 4. Search & Filter
 - Search bar (title + notes)
-- Filters: category, priority, completion status, date range
+- Filters: category, priority, completion status
 - Sort: due date / priority / created / title A-Z
+- All filtering and sorting executed in SQL via dynamic query (Room @RawQuery)
 - Results list (same card style as task list)
 
 ### 5. Categories

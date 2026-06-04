@@ -314,7 +314,9 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.RawQuery
 import androidx.room.Update
+import androidx.sqlite.db.SupportSQLiteQuery
 import com.example.myapplication.data.db.entity.TaskEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -349,6 +351,9 @@ interface TaskDao {
 
     @Query("SELECT * FROM tasks")
     fun getAll(): Flow<List<TaskEntity>>
+
+    @RawQuery(observedEntities = [TaskEntity::class])
+    fun searchFilterSort(query: SupportSQLiteQuery): Flow<List<TaskEntity>>
 
     @Query("SELECT COUNT(*) FROM tasks WHERE parentTaskId = :parentId")
     suspend fun getSubtaskCount(parentId: Long): Int
@@ -868,11 +873,14 @@ class TaskRepositoryTest {
 ```kotlin
 package com.example.myapplication.data.repository
 
+import androidx.sqlite.db.SimpleSQLiteQuery
 import com.example.myapplication.data.db.dao.TaskDao
 import com.example.myapplication.data.db.entity.TaskEntity
 import com.example.myapplication.domain.model.TaskWithSubtasks
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+
+enum class SortBy { DUE_DATE, PRIORITY, CREATED, TITLE }
 
 class TaskRepository(private val taskDao: TaskDao) {
     val rootTasks: Flow<List<TaskEntity>> = taskDao.getRootTasks()
@@ -940,6 +948,46 @@ class TaskRepository(private val taskDao: TaskDao) {
     }
 
     suspend fun getSubtaskCount(taskId: Long): Int = taskDao.getSubtaskCount(taskId)
+
+    fun searchFilterSort(
+        query: String,
+        filterPriority: String?,
+        filterCategoryId: Long?,
+        filterCompleted: Boolean?,
+        sortBy: SortBy,
+    ): Flow<List<TaskEntity>> {
+        val where = mutableListOf<String>()
+        val args = mutableListOf<Any>()
+
+        if (query.isNotBlank()) {
+            where.add("(title LIKE '%' || ? || '%' OR notes LIKE '%' || ? || '%')")
+            args.add(query)
+            args.add(query)
+        }
+        if (filterPriority != null) {
+            where.add("priority = ?")
+            args.add(filterPriority)
+        }
+        if (filterCategoryId != null) {
+            where.add("categoryId = ?")
+            args.add(filterCategoryId)
+        }
+        if (filterCompleted != null) {
+            where.add("isCompleted = ?")
+            args.add(if (filterCompleted) 1 else 0)
+        }
+
+        val whereClause = if (where.isEmpty()) "" else "WHERE " + where.joinToString(" AND ")
+        val orderBy = when (sortBy) {
+            SortBy.DUE_DATE -> "ORDER BY CASE WHEN dueDate IS NULL THEN 1 ELSE 0 END, dueDate ASC"
+            SortBy.PRIORITY -> "ORDER BY CASE priority WHEN 'HIGH' THEN 0 WHEN 'MEDIUM' THEN 1 ELSE 2 END ASC"
+            SortBy.CREATED -> "ORDER BY createdAt DESC"
+            SortBy.TITLE -> "ORDER BY title COLLATE NOCASE ASC"
+        }
+
+        val sql = "SELECT * FROM tasks $whereClause $orderBy"
+        return taskDao.searchFilterSort(SimpleSQLiteQuery(sql, args.toTypedArray()))
+    }
 
     fun search(query: String): Flow<List<TaskEntity>> = taskDao.search(query)
 
@@ -3277,6 +3325,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.myapplication.data.db.entity.CategoryEntity
 import com.example.myapplication.data.db.entity.TaskEntity
 import com.example.myapplication.data.repository.CategoryRepository
+import com.example.myapplication.data.repository.SortBy
 import com.example.myapplication.data.repository.TaskRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -3287,8 +3336,8 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 
 class SearchViewModel(
-    private val taskRepository: TaskRepository,
-    private val categoryRepository: CategoryRepository,
+    private val taskRepo: TaskRepository,
+    private val catRepo: CategoryRepository,
 ) : ViewModel() {
 
     data class UiState(
@@ -3301,8 +3350,6 @@ class SearchViewModel(
         val sortBy: SortBy = SortBy.CREATED,
     )
 
-    enum class SortBy { DUE_DATE, PRIORITY, CREATED, TITLE }
-
     private val _query = MutableStateFlow("")
     private val _filterPriority = MutableStateFlow<String?>(null)
     private val _filterCategoryId = MutableStateFlow<Long?>(null)
@@ -3312,38 +3359,22 @@ class SearchViewModel(
     @OptIn(ExperimentalCoroutinesApi::class)
     val state: StateFlow<UiState> = combine(
         _query, _filterPriority, _filterCategoryId, _filterCompleted, _sortBy
-    ) { query, pri, cat, completed, sort ->
-        listOf(query, pri, cat, completed, sort)
-    }.flatMapLatest { (query, pri, cat, completed, sort) ->
-        combine(
-            if (query.isNotBlank()) taskRepository.search(query as String) else taskRepository.getAll(),
-            categoryRepository.allCategories,
-        ) { tasks, categories ->
-            var filtered = tasks
-            if (pri != null) filtered = filtered.filter { it.priority == pri }
-            if (cat != null) filtered = filtered.filter { it.categoryId == cat }
-            if (completed != null) filtered = filtered.filter { it.isCompleted == completed }
-
-            @Suppress("UNCHECKED_CAST")
-            val sorter: Comparator<TaskEntity> = when (sort as SortBy) {
-                SortBy.DUE_DATE -> compareBy { it.dueDate ?: Long.MAX_VALUE }
-                SortBy.PRIORITY -> compareBy { when (it.priority) { "HIGH" -> 0; "MEDIUM" -> 1; else -> 2 } }
-                SortBy.CREATED -> compareByDescending { it.createdAt }
-                SortBy.TITLE -> compareBy { it.title.lowercase() }
+    ) { q, p, c, done, s -> listOf(q, p, c, done, s) }
+        .flatMapLatest { (q, pri, cat, done, sort) ->
+            combine(
+                taskRepo.searchFilterSort(
+                    q as String, pri as String?, cat as Long?, done as Boolean?, sort as SortBy,
+                ),
+                catRepo.allCategories,
+            ) { tasks, cats ->
+                UiState(
+                    query = q as String, tasks = tasks, categories = cats,
+                    filterPriority = pri as String?, filterCategoryId = cat as Long?,
+                    filterCompleted = done as Boolean?, sortBy = sort as SortBy,
+                )
             }
-            filtered = filtered.sortedWith(sorter)
-
-            UiState(
-                query = query as String,
-                tasks = filtered,
-                categories = categories,
-                filterPriority = pri as String?,
-                filterCategoryId = cat as Long?,
-                filterCompleted = completed as Boolean?,
-                sortBy = sort as SortBy,
-            )
         }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), UiState())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), UiState())
 
     fun setQuery(q: String) { _query.value = q }
     fun setFilterPriority(p: String?) { _filterPriority.value = p }
@@ -3351,9 +3382,7 @@ class SearchViewModel(
     fun setFilterCompleted(c: Boolean?) { _filterCompleted.value = c }
     fun setSortBy(s: SortBy) { _sortBy.value = s }
     fun clearFilters() {
-        _filterPriority.value = null
-        _filterCategoryId.value = null
-        _filterCompleted.value = null
+        _filterPriority.value = null; _filterCategoryId.value = null; _filterCompleted.value = null
     }
 
     class Factory(
@@ -3408,6 +3437,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.example.myapplication.data.repository.SortBy
 import com.example.myapplication.ui.component.EmptyState
 import com.example.myapplication.ui.component.TaskCard
 import com.example.myapplication.data.db.entity.TaskEntity
@@ -3483,7 +3513,7 @@ fun SearchScreen(
                 Box {
                     FilterChip(selected = false, onClick = { showSortMenu = true }, label = { Text("Sort") })
                     DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
-                        SearchViewModel.SortBy.entries.forEach { s ->
+                        SortBy.entries.forEach { s ->
                             DropdownMenuItem(text = { Text(s.name) }, onClick = { viewModel.setSortBy(s); showSortMenu = false })
                         }
                     }
@@ -3553,79 +3583,67 @@ Expected: BUILD SUCCESSFUL
 package com.example.myapplication.worker
 
 import android.Manifest
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.Build
+import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import com.example.myapplication.MainActivity
 import com.example.myapplication.R
+import com.example.myapplication.data.db.AppDatabase
+import com.example.myapplication.data.db.entity.TaskEntity
 
-class ReminderWorker(
-    context: Context,
-    params: WorkerParameters,
-) : CoroutineWorker(context, params) {
+class ReminderWorker(appContext: Context, params: WorkerParameters) : CoroutineWorker(appContext, params) {
 
     companion object {
         const val CHANNEL_ID = "task_reminders"
-        const val KEY_TASK_TITLE = "task_title"
-        const val KEY_TASK_ID = "task_id"
+        const val NOTIFICATION_ID_BASE = 1000
     }
 
     override suspend fun doWork(): Result {
-        val title = inputData.getString(KEY_TASK_TITLE) ?: "Task Reminder"
-        val taskId = inputData.getLong(KEY_TASK_ID, 0)
+        val db = AppDatabase.getInstance(applicationContext)
+        val tasks = db.taskDao().getAllSnapshot()
 
-        createNotificationChannel()
-        showNotification(title, taskId)
+        val now = System.currentTimeMillis()
+        for (task in tasks) {
+            val reminderMin = task.reminderMinutes ?: continue
+            val dueDate = task.dueDate ?: continue
+            val reminderTime = dueDate - (reminderMin * 60_000L)
 
+            if (reminderTime <= now && reminderTime > now - 5 * 60_000L) {
+                sendNotification(task)
+            }
+        }
         return Result.success()
     }
 
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Task Reminders",
-                NotificationManager.IMPORTANCE_HIGH,
-            ).apply {
-                description = "Notifications for task due dates"
-            }
-            val manager = applicationContext.getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
-        }
-    }
+    private fun sendNotification(task: TaskEntity) {
+        val intent = applicationContext.packageManager
+            .getLaunchIntentForPackage(applicationContext.packageName) ?: return
+        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
 
-    private fun showNotification(title: String, taskId: Long) {
-        val intent = Intent(applicationContext, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-            putExtra("task_id", taskId)
-        }
         val pendingIntent = PendingIntent.getActivity(
-            applicationContext, taskId.toInt(), intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            applicationContext, task.id.toInt(), intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
         val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle("Task Due")
-            .setContentText(title)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle(task.title)
+            .setContentText(task.notes.ifBlank { "Task reminder" })
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .build()
 
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-            ContextCompat.checkSelfPermission(applicationContext, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        if (ActivityCompat.checkSelfPermission(applicationContext, Manifest.permission.POST_NOTIFICATIONS)
+            == PackageManager.PERMISSION_GRANTED
         ) {
-            NotificationManagerCompat.from(applicationContext).notify(taskId.toInt(), notification)
+            NotificationManagerCompat.from(applicationContext)
+                .notify(NOTIFICATION_ID_BASE + task.id.toInt(), notification)
         }
     }
 }
@@ -3650,19 +3668,29 @@ Expected: BUILD SUCCESSFUL
 package com.example.myapplication
 
 import android.app.Application
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import androidx.work.Configuration
 import androidx.work.WorkManager
+import com.example.myapplication.worker.ReminderWorker
 
 class MyApp : Application(), Configuration.Provider {
+
+    override fun onCreate() {
+        super.onCreate()
+        val channel = NotificationChannel(
+            ReminderWorker.CHANNEL_ID,
+            "Task Reminders",
+            NotificationManager.IMPORTANCE_HIGH,
+        )
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(channel)
+    }
+
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
             .setMinimumLoggingLevel(android.util.Log.INFO)
             .build()
-
-    override fun onCreate() {
-        super.onCreate()
-        WorkManager.initialize(this, workManagerConfiguration)
-    }
 }
 ```
 
