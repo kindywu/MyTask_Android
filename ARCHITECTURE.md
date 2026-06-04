@@ -785,7 +785,78 @@ graph TD
 - 任务详情页支持深层导航：查看子任务会导航到新的 `task/{id}` 实例，形成详情页的导航栈。
 - `taskId=0` 是"新建任务"的约定——ViewModel 通过 `taskId == 0L` 判断是创建还是编辑模式。
 
-### 6.3 ViewModel Factory 模式
+### 6.3 页面跳转方法
+
+Navigation Compose 提供两种核心操作来切换路由：
+
+**前进（跳转到新页面）：**
+```kotlin
+navController.navigate(Routes.TASK_LIST)
+navController.navigate(Routes.taskDetail(id))  // 带参数
+navController.navigate(Routes.taskDetail(0))   // taskId=0 约定为"新建任务"
+```
+
+**返回（回到上一页）：**
+```kotlin
+navController.popBackStack()
+```
+
+**跳转并清除之前的页面：**
+用 `popUpTo` 把指定路由从返回栈中移除：
+```kotlin
+// NavGraph.kt 第 52 行 —— PinLock 实际代码
+onUnlocked = {
+    navController.navigate(Routes.TASK_LIST) {
+        popUpTo(Routes.PIN_LOCK) { inclusive = true }
+    }
+}
+```
+`inclusive = true` 表示连 `PIN_LOCK` 自己也从栈中移除，按返回键不会回到 PinLock，而是直接退出应用。
+
+**项目中的实际使用：**
+
+`TASK_LIST` — 有 5 种跳转，无返回（作为主页面，不设 onBack）：
+```kotlin
+// NavGraph.kt 第 56-65 行 — 实际代码
+composable(Routes.TASK_LIST) {
+    val vm: TaskListViewModel = viewModel(factory = TaskListViewModel.Factory(taskRepo, catRepo))
+    TaskListScreen(
+        viewModel = vm,
+        onTaskClick  = { id -> navController.navigate(Routes.taskDetail(id)) },
+        onNewTask    = { navController.navigate(Routes.taskDetail(0)) },
+        onSearch     = { navController.navigate(Routes.SEARCH) },
+        onCategories = { navController.navigate(Routes.CATEGORIES) },
+        onSettings   = { navController.navigate(Routes.SETTINGS) },
+    )
+}
+```
+
+`CATEGORIES` / `SETTINGS` —— 只有返回：
+```kotlin
+// NavGraph.kt 第 88-95 行 — 实际代码
+CategoriesScreen(viewModel = vm, onBack = { navController.popBackStack() })
+SettingsScreen(viewModel = vm, onBack = { navController.popBackStack() })
+```
+
+`SEARCH` — 返回 + 跳转详情：
+```kotlin
+// NavGraph.kt 第 98-101 行 — 实际代码
+SearchScreen(
+    viewModel = vm,
+    onBack = { navController.popBackStack() },
+    onTaskClick = { id -> navController.navigate(Routes.taskDetail(id)) },
+)
+```
+
+**方法速查：**
+
+| 方法 | 效果 |
+|------|------|
+| `navController.navigate("route")` | 跳转到目标路由，压入返回栈 |
+| `navController.popBackStack()` | 弹出当前路由，返回上一页 |
+| `navigate("route") { popUpTo("old") { inclusive = true } }` | 跳转的同时清除返回栈中的旧页面 |
+
+### 6.4 ViewModel Factory 模式
 
 没有 DI 框架的情况下，每个 ViewModel 都有一个内部 `Factory` 类实现 `ViewModelProvider.Factory`：
 
